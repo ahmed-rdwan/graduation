@@ -67,7 +67,7 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, allowed_types: 
         if not is_present:
             continue 
             
-        active_tasks = db.workingtasks.count_documents({"user_id": user_id})
+        active_tasks = db.workingtasks.count_documents({"user_id": user_id, "status": "active"})
             
         candidates.append({
             "user_id": user_id,
@@ -121,7 +121,8 @@ def allocate_task_to_best_employee(task_id: str, team_id: str) -> dict:
             "user_id": best_user_id,
             "company_id": task.get("company_id"),
             "start_date": now_utc,
-            "end_date": now_utc 
+            "end_date": None,
+            "status": "active"
         })
         db.tasks.update_one({"_id": task["_id"]}, {"$set": {"assigned": True, "status": "in_progress"}})
         
@@ -143,6 +144,16 @@ def allocate_ticket_to_it(ticket_id: str) -> dict:
         if not best_user_id:
             return {"success": False, "msg": "No available IT staff found to handle this ticket."}
 
+        now_utc = datetime.now(timezone.utc)
+        db.workingtasks.insert_one({
+            "custom_id": generate_custom_id("wt_ai"), 
+            "ticket_id": ticket["_id"],
+            "user_id": best_user_id,
+            "company_id": ticket.get("company_id"),
+            "start_date": now_utc,
+            "end_date": None,
+            "status": "active"
+        })
         db.tickets.update_one(
             {"_id": ticket["_id"]}, 
             {"$set": {"assign_to": best_user_id, "status": "in_progress"}}
@@ -182,6 +193,39 @@ async def api_assign_task(req: TaskAssignRequest):
         raise HTTPException(status_code=400, detail=result["msg"])
     return {"message": result["msg"], "assigned_user_id": result["assigned_to"]}
 
+class BulkTaskAssignRequest(BaseModel):
+    task_ids: list[str]
+    team_id: str 
+
+@router.post("/api/ai/assign-bulk-tasks")
+async def api_assign_bulk_tasks(req: BulkTaskAssignRequest):
+    results = []
+    for tid in req.task_ids:
+        res = allocate_task_to_best_employee(tid, req.team_id)
+        results.append({"task_id": tid, "result": res})
+    return {"message": f"Processed {len(req.task_ids)} tasks.", "details": results}
+
+class TicketAssignRequest(BaseModel):
+    ticket_id: str
+
+@router.post("/api/ai/assign-ticket")
+async def api_assign_ticket(req: TicketAssignRequest):
+    result = allocate_ticket_to_it(req.ticket_id)
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["msg"])
+    return {"message": result["msg"], "assigned_user_id": result["assigned_to"]}
+
+class BulkTicketAssignRequest(BaseModel):
+    ticket_ids: list[str]
+
+@router.post("/api/ai/assign-bulk-tickets")
+async def api_assign_bulk_tickets(req: BulkTicketAssignRequest):
+    results = []
+    for tid in req.ticket_ids:
+        res = allocate_ticket_to_it(tid)
+        results.append({"ticket_id": tid, "result": res})
+    return {"message": f"Processed {len(req.ticket_ids)} tickets.", "details": results}
+
 class TicketCreateRequest(BaseModel):
     title: str
     description: str
@@ -219,6 +263,7 @@ class CompleteWorkRequest(BaseModel):
 @router.post("/api/work/complete")
 async def api_complete_work(req: CompleteWorkRequest, background_tasks: BackgroundTasks):
     text_content = ""
+    now_utc = datetime.now(timezone.utc)
     
     if req.work_type == "task":
         db.tasks.update_one({"_id": ObjectId(req.work_id)}, {"$set": {"status": "completed"}})
@@ -226,11 +271,21 @@ async def api_complete_work(req: CompleteWorkRequest, background_tasks: Backgrou
         if task:
             text_content = f"{task.get('name','')} {task.get('description', '')}"
             
+        db.workingtasks.update_many(
+            {"task_id": ObjectId(req.work_id)},
+            {"$set": {"status": "completed", "end_date": now_utc}}
+        )
+            
     elif req.work_type == "ticket":
         db.tickets.update_one({"_id": ObjectId(req.work_id)}, {"$set": {"status": "closed"}})
         ticket = db.tickets.find_one({"_id": ObjectId(req.work_id)})
         if ticket:
             text_content = f"{ticket.get('name','')} {ticket.get('description', '')}"
+            
+        db.workingtasks.update_many(
+            {"ticket_id": ObjectId(req.work_id)},
+            {"$set": {"status": "completed", "end_date": now_utc}}
+        )
 
     if text_content:
         background_tasks.add_task(learn_from_completion, req.user_id, text_content)
@@ -241,3 +296,232 @@ async def api_complete_work(req: CompleteWorkRequest, background_tasks: Backgrou
 async def api_trigger_stock(background_tasks: BackgroundTasks):
     background_tasks.add_task(predict_stock_with_meta)
     return {"message": "Meta Prophet AI started checking stock in the background."}
+
+@router.get("/api/ai/stock-predictions")
+async def api_get_stock_predictions():
+    try:
+        results = predict_stock_with_meta()
+        return {
+            "success": True, 
+            "message": "Stock predictions generated successfully.", 
+            "data": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class HelpSolveRequest(BaseModel):
+    details: str = ""
+    context: str = "project management task"
+    item_id: str = None
+    item_type: str = "task" # "task" or "ticket"
+
+@router.post("/api/ai/help-solve")
+async def api_help_solve(req: HelpSolveRequest):
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        import os, random
+
+        keys = os.getenv("GOOGLE_API_KEYS")
+        if keys:
+            key_list = [k.strip() for k in keys.split(",") if k.strip()]
+            if key_list:
+                os.environ["GOOGLE_API_KEY"] = random.choice(key_list)
+
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
+        
+        task_info = req.details
+        
+        # لو اليوزر باعت ID، هنسحب الداتا بتاعت التاسك أو التيكت من الداتا بيز عشان الـ AI يفهم السياق بالكامل
+        if req.item_id:
+            if req.item_type == "task":
+                item = db.tasks.find_one({"_id": ObjectId(req.item_id)})
+            elif req.item_type == "ticket":
+                item = db.tickets.find_one({"_id": ObjectId(req.item_id)})
+            else:
+                item = None
+                
+            if item:
+                task_info = f"Title: {item.get('name')}\nDescription: {item.get('description', 'No description')}\nPriority: {item.get('priority', 'Normal')}\nStatus: {item.get('status', 'Open')}"
+                if not req.details:
+                    req.details = "Please solve this database item."
+            else:
+                return {"success": False, "message": "Item not found in database."}
+
+        if not task_info.strip():
+            return {"success": False, "message": "Please provide details or a valid item_id."}
+
+        prompt = f"""
+        You are a highly experienced Senior Project Manager and Technical Lead.
+        A team member has asked for help on the following task or problem:
+        
+        {task_info}
+        
+        Additional User Notes/Questions: "{req.details}"
+        Context: {req.context}
+        
+        Please provide a clear, step-by-step actionable guide to solve this task. 
+        Break down the problem, suggest tools or methodologies if applicable, and outline the exact steps they should take to complete it successfully. Keep your response professional, encouraging, and formatted in Markdown.
+        """
+        response = llm.invoke(prompt)
+        return {
+            "success": True,
+            "solution": response.content
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class ExtractStockRequest(BaseModel):
+    task_id: str
+    company_id: str
+
+@router.post("/api/ai/extract-stock-usage")
+async def api_extract_stock_usage(req: ExtractStockRequest):
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        import json
+        import os, random
+
+        keys = os.getenv("GOOGLE_API_KEYS")
+        if keys:
+            key_list = [k.strip() for k in keys.split(",") if k.strip()]
+            if key_list:
+                os.environ["GOOGLE_API_KEY"] = random.choice(key_list)
+
+        # 1. Fetch Task Comment
+        task = db.tasks.find_one({"_id": ObjectId(req.task_id)})
+        if not task:
+            return {"success": False, "message": "Task not found."}
+            
+        comment = task.get("comment", "")
+        if not comment:
+            return {"success": False, "message": "No comment/description found in this task.", "used_items": []}
+
+        # 2. Fetch Company Stock
+        stocks = list(db.stocks.find({"company_id": ObjectId(req.company_id)}, {"name": 1}))
+        stock_names = [s["name"] for s in stocks]
+        
+        if not stock_names:
+            return {"success": False, "message": "No stock available in company.", "used_items": []}
+
+        # 3. Ask AI to extract usage based on the actual stock list
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+        prompt = f"""
+        You are a smart inventory assistant.
+        The employee wrote the following comment after completing a task:
+        "{comment}"
+        
+        The company's available stock items are:
+        {stock_names}
+        
+        Did the employee mention consuming or using any of these stock items? 
+        If yes, extract the items and their quantities. If they mention an item that roughly matches our stock names, map it to our exact stock name.
+        Return ONLY a valid JSON array of objects, like this:
+        [
+            {{"item_name": "exact stock name", "quantity": 1}}
+        ]
+        If no items were used, return []. Do not include markdown formatting or backticks around the JSON.
+        """
+        response = llm.invoke(prompt)
+        
+        try:
+            # Clean up the response in case it has markdown ticks
+            clean_json = response.content.strip().strip('```json').strip('```').strip()
+            used_items = json.loads(clean_json)
+        except:
+            used_items = []
+
+        return {
+            "success": True,
+            "used_items": used_items
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class BreakdownRequest(BaseModel):
+    description: str
+
+@router.post("/api/ai/breakdown-task")
+async def api_breakdown_task(req: BreakdownRequest):
+    try:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        import json
+        import os, random
+
+        keys = os.getenv("GOOGLE_API_KEYS")
+        if keys:
+            key_list = [k.strip() for k in keys.split(",") if k.strip()]
+            if key_list:
+                os.environ["GOOGLE_API_KEY"] = random.choice(key_list)
+
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
+        prompt = f"""
+        You are an expert Agile Scrum Master and Technical Lead. 
+        A manager has provided the following high-level description for a project or large task:
+        "{req.description}"
+        
+        Break this down into small, actionable tasks that can be assigned to team members.
+        For each task, provide a "name" (short title), a "description", and a recommended "priority" (high, medium, low).
+        
+        Return ONLY a valid JSON array of objects, like this:
+        [
+            {{"name": "Task Title", "description": "Detailed description...", "priority": "high"}}
+        ]
+        Do not include markdown formatting or backticks around the JSON.
+        """
+        response = llm.invoke(prompt)
+        
+        try:
+            clean_json = response.content.strip().strip('```json').strip('```').strip()
+            tasks = json.loads(clean_json)
+        except:
+            return {"success": False, "message": "Failed to parse AI response.", "raw_response": response.content}
+
+        return {
+            "success": True,
+            "tasks": tasks
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+from typing import List
+
+class TaskItem(BaseModel):
+    name: str
+    description: str
+    priority: str
+    assigned_to: str # ObjectId string
+    backlog_id: str # ObjectId string
+
+class BulkCreateTasksRequest(BaseModel):
+    company_id: str
+    created_by: str
+    tasks: List[TaskItem]
+
+@router.post("/api/ai/bulk-create-tasks")
+async def api_bulk_create_tasks(req: BulkCreateTasksRequest):
+    try:
+        from datetime import datetime
+        new_tasks = []
+        for t in req.tasks:
+            task_doc = {
+                "custom_id": generate_custom_id("tsk"),
+                "name": t.name,
+                "description": t.description,
+                "priority": t.priority,
+                "status": "todo",
+                "assigned_to": [ObjectId(t.assigned_to)],
+                "assigned": True,
+                "backlog_id": ObjectId(t.backlog_id),
+                "created_by": ObjectId(req.created_by),
+                "company_id": ObjectId(req.company_id),
+                "createdAt": datetime.utcnow(),
+                "updatedAt": datetime.utcnow()
+            }
+            new_tasks.append(task_doc)
+            
+        if new_tasks:
+            db.tasks.insert_many(new_tasks)
+            
+        return {"success": True, "message": f"Successfully created {len(new_tasks)} tasks and assigned them."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

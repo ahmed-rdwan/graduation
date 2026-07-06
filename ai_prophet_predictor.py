@@ -71,15 +71,15 @@ def create_alert_ticket(item_name, current_qty, days_left, empty_date):
     ticket_title = f"AI Stock Alert: {item_name}"
 
     # حماية من التكرار: لو في تيكت مفتوح بالفعل، نتخطى
-    existing = db.ticket.find_one({"name": ticket_title, "status": "Open"})
+    existing = db.tickets.find_one({"name": ticket_title, "status": "Open"})
     if existing:
         print(f"   ⏳ An open alert ticket already exists for this item. Skipping.")
         return
 
-    admin = db.user.find_one({"type": "admin"})
+    admin = db.users.find_one({"type": "admin"})
     admin_id = admin["_id"] if admin else None
 
-    db.ticket.insert_one({
+    db.tickets.insert_one({
         "name": ticket_title,
         "description": (
             f"AI System Warning: Current stock for '{item_name}' is ({current_qty}) units. "
@@ -112,14 +112,14 @@ def analyze_stock_item(stock):
     # مخزن فارغ من الأساس، مفيش داعي للتحليل
     if current_qty <= 0:
         print(f"   ⚠️ Stock is already empty.")
-        return
+        return {"item_id": str(item_id), "item_name": item_name, "status": "empty", "current_qty": 0}
 
     # سحب سجلات الاستهلاك (remove بس، الـ add مش بيأثر على التوقع)
     history = list(db.ai_stock_history.find({"stock_id": item_id, "action": "remove"}))
 
     if len(history) < MIN_HISTORY_RECORDS:
         print(f"   📊 Insufficient data for training ({len(history)}/{MIN_HISTORY_RECORDS} records).")
-        return
+        return {"item_id": str(item_id), "item_name": item_name, "status": "insufficient_data", "current_qty": current_qty}
 
     print(f"   🧠 Training Meta Prophet model on {len(history)} records...")
 
@@ -129,7 +129,7 @@ def analyze_stock_item(stock):
     # لو الداتا كلها في نفس اليوم، Prophet مش هيشتغل
     if forecast is None:
         print(f"   ⚠️ All records share the same date. Prophet requires variation across dates.")
-        return
+        return {"item_id": str(item_id), "item_name": item_name, "status": "insufficient_variation", "current_qty": current_qty}
 
     # حساب متوسط السحب اليومي المتوقع في الـ FORECAST_DAYS الجايين
     # الـ yhat في Prophet = الرقم المتوقع
@@ -151,22 +151,36 @@ def analyze_stock_item(stock):
         create_alert_ticket(item_name, current_qty, days_left, empty_date)
     else:
         print(f"   ✅ Stock level is safe.")
+        
+    return {
+        "item_id": str(item_id),
+        "item_name": item_name,
+        "current_qty": current_qty,
+        "status": "critical" if days_left <= ALERT_THRESHOLD_DAYS else "safe",
+        "daily_burn_rate": round(daily_burn_rate, 2),
+        "days_left": days_left,
+        "empty_date": empty_date.isoformat()
+    }
 
 
 def predict_stock_with_meta():
     print("🤖 Meta Prophet AI Core Started...\n" + "="*40)
 
-    stocks = list(db.stock_item.find())
+    stocks = list(db.stocks.find())
 
     if not stocks:
         print("❌ No stock items found in the database.")
         return
 
+    results = []
     for stock in stocks:
-        analyze_stock_item(stock)
+        res = analyze_stock_item(stock)
+        if res:
+            results.append(res)
 
     print(f"\n{'='*40}")
     print("🏁 Prediction cycle completed successfully.")
+    return results
 
 
 if __name__ == "__main__":

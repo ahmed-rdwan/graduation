@@ -15,8 +15,15 @@ MONGO_URI = os.getenv("MONGO_URI")
 client = MongoClient(MONGO_URI)
 db = client["test"]
 
-# تجهيز موديل تحويل النصوص لأرقام بتاع جوجل
-embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+import random
+
+def get_random_embedding_key():
+    keys = os.getenv("GOOGLE_EMBEDDING_API_KEYS") or os.getenv("GOOGLE_API_KEYS")
+    if keys:
+        key_list = [k.strip() for k in keys.split(",") if k.strip()]
+        if key_list:
+            return random.choice(key_list)
+    return os.getenv("GOOGLE_EMBEDDING_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 def setup_database():
     documents = []
@@ -48,11 +55,19 @@ def setup_database():
         documents.append(Document(page_content=content, metadata={"source_id": str(ticket["_id"]), "type": "ticket"}))
 
     # --- 6. Stock Items ---
+   
+   # مثال لتعديل سطر الـ stocks في setup_vector_db.py
     for item in db["stocks"].find():
-        content = f"Inventory Item: {item.get('name', 'Unknown')}, Category: {item.get('category', 'General')}, Quantity available: {item.get('quantity', 0)}"
-        documents.append(Document(page_content=content, metadata={"source_id": str(item["_id"]), "type": "stock"}))
-
-    print(f"Successfully extracted {len(documents)} documents.")
+        content = f"Inventory Item: {item.get('name', '')}, Quantity: {item.get('quantity', 0)}"
+        documents.append(Document(
+            page_content=content, 
+            metadata={
+                "source_id": str(item["_id"]), 
+                "type": "stock", 
+                "company_id": str(item.get("company_id", "")) # 👈 ده الجزء الأهم
+            }
+        ))
+   
     
     # حماية من الداتا بيز الفاضية
     if len(documents) == 0:
@@ -64,15 +79,17 @@ def setup_database():
 
     print("Embedding in small batches to bypass Google limits...")
     
-    # تعريف الذاكرة
-    vector_db = Chroma(embedding_function=embeddings, persist_directory="./chroma_db")
-    
     # تقسيم الملفات عشان جوجل (Batching)
     batch_size = 15 
     for i in range(0, len(documents), batch_size):
+        # 🔄 اختيار مفتاح عشوائي لكل Batch عشان نوزع الحمل!
+        current_key = get_random_embedding_key()
+        embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001", google_api_key=current_key)
+        vector_db = Chroma(embedding_function=embeddings, persist_directory="./chroma_db")
+        
         batch = documents[i:i+batch_size]
         vector_db.add_documents(batch)
-        print(f"✅ Embedded {min(i + batch_size, len(documents))} / {len(documents)}...")
+        print(f"✅ Embedded {min(i + batch_size, len(documents))} / {len(documents)} using key {current_key[:15]}...")
         
         # وقت راحة للـ API عشان ميضربش Rate Limit
         if i + batch_size < len(documents):

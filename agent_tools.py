@@ -260,3 +260,279 @@ def update_ticket_status(ticket_name: str, new_status: str, user_role: str, user
         {"$set": {"status": new_status, "status_changed_at": datetime.datetime.utcnow(), "updatedAt": datetime.datetime.utcnow()}}
     )
     return f"✅ Success: Ticket '{ticket.get('name', ticket_name)}' status updated: '{old_status}' → '{new_status}'."
+
+# -----------------------------------------
+# Tool 11: Create Project (للإدمن والمدير فقط)
+# -----------------------------------------
+@tool
+def create_project(project_name: str, description: str, user_role: str, user_id: str, company_id: str) -> str:
+    """Creates a new project in the system."""
+    if user_role not in ["admin", "manager"]:
+        return "❌ Access Denied: Only Admins and Managers can create projects."
+    
+    db.projects.insert_one({
+        "name": project_name,
+        "description": description,
+        "created_by": ObjectId(user_id),
+        "company_id": ObjectId(company_id),
+        "members": [ObjectId(user_id)],
+        "createdAt": datetime.datetime.utcnow(),
+        "updatedAt": datetime.datetime.utcnow()
+    })
+    return f"✅ Project '{project_name}' created successfully."
+
+# -----------------------------------------
+# Tool 12: Get Projects (مفلترة حسب الصلاحية)
+# -----------------------------------------
+@tool
+def get_projects(user_role: str, user_id: str, company_id: str) -> str:
+    """Retrieves projects the user has access to."""
+    query = {"company_id": ObjectId(company_id)}
+    
+    # User only sees projects they are a member of
+    if user_role not in ["admin", "manager"]:
+        query["members"] = ObjectId(user_id)
+        
+    projects = list(db.projects.find(query))
+    if not projects:
+        return "No projects found."
+        
+    report = ["📂 Projects:"]
+    for p in projects:
+        report.append(f"  - '{p.get('name', 'Unknown')}' | Members: {len(p.get('members', []))}")
+    return "\n".join(report)
+
+# -----------------------------------------
+# Tool 13: Send Notification (متاحة للكل)
+# -----------------------------------------
+@tool
+def send_notification(recipient_name: str, title: str, message: str, user_role: str, user_id: str, company_id: str) -> str:
+    """Sends an internal notification to a specific user by name."""
+    recipient = db.users.find_one({"name": {"$regex": recipient_name, "$options": "i"}, "company_id": ObjectId(company_id)})
+    if not recipient:
+        return f"❌ Error: User '{recipient_name}' not found."
+        
+    db.notifications.insert_one({
+        "recipient": recipient["_id"],
+        "sender": ObjectId(user_id),
+        "company_id": ObjectId(company_id),
+        "type": "system",
+        "title": title,
+        "message": message,
+        "read": False,
+        "createdAt": datetime.datetime.utcnow()
+    })
+    return f"✅ Notification '{title}' sent to {recipient.get('name')}."
+
+# -----------------------------------------
+# Tool 14: Get My Notifications (لليوزر نفسه)
+# -----------------------------------------
+@tool
+def get_my_notifications(user_role: str, user_id: str, company_id: str) -> str:
+    """Retrieves unread notifications for the user."""
+    notifications = list(db.notifications.find({"recipient": ObjectId(user_id), "read": False}))
+    if not notifications:
+        return "You have no unread notifications."
+        
+    report = ["🔔 Unread Notifications:"]
+    for n in notifications:
+        report.append(f"  - [{n.get('type', 'system')}] {n.get('title')}: {n.get('message')}")
+        
+    return "\n".join(report)
+
+# -----------------------------------------
+# Tool 15: Check Attendance (للإدمن والمدير فقط)
+# -----------------------------------------
+@tool
+def check_attendance(user_role: str, user_id: str, company_id: str) -> str:
+    """Checks who is present today."""
+    if user_role not in ["admin", "manager"]:
+        return "❌ Access Denied: Only Admins and Managers can view attendance."
+        
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + datetime.timedelta(days=1)
+    
+    # Find all schedules for today with 'arrived'
+    schedules = list(db.schedules.find({
+        "company_id": ObjectId(company_id),
+        "entries": {
+            "$elemMatch": {
+                "date": {"$gte": today_start, "$lt": today_end},
+                "shift_type": "arrived"
+            }
+        }
+    }))
+    
+    if not schedules:
+        return "Nobody has checked in today yet."
+        
+    present_user_ids = [s["user_id"] for s in schedules]
+    users = list(db.users.find({"_id": {"$in": present_user_ids}}))
+    
+    report = ["⏰ Present Today:"]
+    for u in users:
+        report.append(f"  - {u.get('name')} ({u.get('role', 'user')})")
+    return "\n".join(report)
+
+# -----------------------------------------
+# Tool 16: Get Company Stats (للإدمن والمدير فقط)
+# -----------------------------------------
+@tool
+def get_company_stats(user_role: str, user_id: str, company_id: str) -> str:
+    """Retrieves high-level company statistics (Users, Projects, Tickets, Tasks)."""
+    if user_role not in ["admin", "manager"]:
+        return "❌ Access Denied: Only Admins and Managers can view company stats."
+        
+    cid = ObjectId(company_id)
+    total_users = db.users.count_documents({"company_id": cid})
+    total_projects = db.projects.count_documents({"company_id": cid})
+    open_tickets = db.tickets.count_documents({"company_id": cid, "status": "open"})
+    active_tasks = db.tasks.count_documents({"company_id": cid, "status": "in_progress"})
+    
+    report = [
+        "📊 Company Statistics:",
+        f"  - Total Users: {total_users}",
+        f"  - Total Projects: {total_projects}",
+        f"  - Open Tickets: {open_tickets}",
+        f"  - Active Tasks: {active_tasks}"
+    ]
+    return "\n".join(report)
+
+# -----------------------------------------
+# Tool 17: Create Team (للإدمن والمدير فقط)
+# -----------------------------------------
+@tool
+def create_team(team_name: str, description: str, user_role: str, user_id: str, company_id: str) -> str:
+    """Creates a new team in the system."""
+    if user_role not in ["admin", "manager"]:
+        return "❌ Access Denied: Only Admins and Managers can create teams."
+        
+    db.teams.insert_one({
+        "name": team_name,
+        "description": description,
+        "members": [{"user": ObjectId(user_id), "role": "admin", "joined_at": datetime.datetime.utcnow()}],
+        "created_by": ObjectId(user_id),
+        "company_id": ObjectId(company_id),
+        "createdAt": datetime.datetime.utcnow(),
+        "updatedAt": datetime.datetime.utcnow()
+    })
+    return f"✅ Team '{team_name}' created successfully."
+
+# -----------------------------------------
+# Tool 18: Get Teams (مفلترة للشركة)
+# -----------------------------------------
+@tool
+def get_teams(user_role: str, user_id: str, company_id: str) -> str:
+    """Retrieves all teams in the company."""
+    teams = list(db.teams.find({"company_id": ObjectId(company_id)}))
+    if not teams:
+        return "No teams found in the company."
+        
+    report = ["👥 Company Teams:"]
+    for t in teams:
+        report.append(f"  - '{t.get('name', 'Unknown')}' | Members: {len(t.get('members', []))}")
+    return "\n".join(report)
+
+# -----------------------------------------
+# Tool 19: Create Backlog (للإدمن والمدير فقط)
+# -----------------------------------------
+@tool
+def create_backlog(backlog_name: str, project_name: str, goal: str, user_role: str, user_id: str, company_id: str) -> str:
+    """Creates a backlog for a specific project."""
+    if user_role not in ["admin", "manager"]:
+        return "❌ Access Denied: Only Admins and Managers can create backlogs."
+        
+    project = db.projects.find_one({"name": {"$regex": project_name, "$options": "i"}, "company_id": ObjectId(company_id)})
+    if not project:
+        return f"❌ Error: Project '{project_name}' not found."
+        
+    db.backlogs.insert_one({
+        "name": backlog_name,
+        "status": "open",
+        "backlog_goal": goal,
+        "project_id": project["_id"],
+        "created_by": ObjectId(user_id),
+        "company_id": ObjectId(company_id),
+        "createdAt": datetime.datetime.utcnow(),
+        "updatedAt": datetime.datetime.utcnow()
+    })
+    return f"✅ Backlog '{backlog_name}' created under project '{project.get('name')}'."
+
+# -----------------------------------------
+# Tool 20: Get Backlogs
+# -----------------------------------------
+@tool
+def get_backlogs(project_name: str, user_role: str, user_id: str, company_id: str) -> str:
+    """Retrieves all backlogs for a project."""
+    project = db.projects.find_one({"name": {"$regex": project_name, "$options": "i"}, "company_id": ObjectId(company_id)})
+    if not project:
+        return f"❌ Error: Project '{project_name}' not found."
+        
+    backlogs = list(db.backlogs.find({"project_id": project["_id"]}))
+    if not backlogs:
+        return f"No backlogs found for project '{project.get('name')}'."
+        
+    report = [f"📋 Backlogs for '{project.get('name')}':"]
+    for b in backlogs:
+        report.append(f"  - {b.get('name')} (Status: {b.get('status')}) - Goal: {b.get('backlog_goal', 'N/A')}")
+    return "\n".join(report)
+
+# -----------------------------------------
+# Tool 21: Create Task
+# -----------------------------------------
+@tool
+def create_task(task_name: str, description: str, priority: str, project_name: str, user_role: str, user_id: str, company_id: str) -> str:
+    """Creates a new task in a project."""
+    if user_role not in ["admin", "manager"]:
+        return "❌ Access Denied: Only Admins and Managers can create tasks."
+        
+    project = db.projects.find_one({"name": {"$regex": project_name, "$options": "i"}, "company_id": ObjectId(company_id)})
+    if not project:
+        return f"❌ Error: Project '{project_name}' not found."
+        
+    valid_priorities = ["High", "Medium", "Low", "urgent"]
+    priority = priority if priority in valid_priorities else "Medium"
+        
+    db.tasks.insert_one({
+        "name": task_name,
+        "description": description,
+        "status": "todo",
+        "priority": priority,
+        "project": project["_id"],
+        "assigned_to": None,
+        "created_by": ObjectId(user_id),
+        "company_id": ObjectId(company_id),
+        "createdAt": datetime.datetime.utcnow(),
+        "updatedAt": datetime.datetime.utcnow()
+    })
+    return f"✅ Task '{task_name}' created in project '{project.get('name')}'."
+
+# -----------------------------------------
+# Tool 22: Create Sprint
+# -----------------------------------------
+@tool
+def create_sprint(sprint_name: str, duration_days: int, project_name: str, user_role: str, user_id: str, company_id: str) -> str:
+    """Creates a sprint for a project with start and end dates."""
+    if user_role not in ["admin", "manager"]:
+        return "❌ Access Denied: Only Admins and Managers can create sprints."
+        
+    project = db.projects.find_one({"name": {"$regex": project_name, "$options": "i"}, "company_id": ObjectId(company_id)})
+    if not project:
+        return f"❌ Error: Project '{project_name}' not found."
+        
+    start_date = datetime.datetime.utcnow()
+    end_date = start_date + datetime.timedelta(days=duration_days)
+        
+    db.sprints.insert_one({
+        "name": sprint_name,
+        "status": "planned",
+        "start_date": start_date,
+        "end_date": end_date,
+        "project_id": project["_id"],
+        "created_by": ObjectId(user_id),
+        "company_id": ObjectId(company_id),
+        "createdAt": datetime.datetime.utcnow(),
+        "updatedAt": datetime.datetime.utcnow()
+    })
+    return f"✅ Sprint '{sprint_name}' created for {duration_days} days in project '{project.get('name')}'."

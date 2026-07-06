@@ -1,4 +1,5 @@
 import os
+import random
 import asyncio
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -13,6 +14,17 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.messages import ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
+def get_random_api_key():
+    keys = os.getenv("GOOGLE_API_KEYS")
+    if keys:
+        key_list = [k.strip() for k in keys.split(",") if k.strip()]
+        if key_list:
+            selected_key = random.choice(key_list)
+            # Override env variable so other modules like embeddings use it implicitly if needed
+            os.environ["GOOGLE_API_KEY"] = selected_key
+            return selected_key
+    return os.getenv("GOOGLE_API_KEY")
+
 from allocation_engine import router as allocation_router
 
 # Tools - مسارات صحيحة
@@ -20,7 +32,11 @@ from agent_tools import (
     create_ticket, manage_stock, update_task_status,
     get_inventory, search_employee, get_my_tasks,
     get_sprint_status, get_my_tickets,
-    get_team_report, update_ticket_status
+    get_team_report, update_ticket_status,
+    create_project, get_projects, send_notification,
+    get_my_notifications, check_attendance, get_company_stats,
+    create_team, get_teams, create_backlog,
+    get_backlogs, create_task, create_sprint
 )
 
 load_dotenv()
@@ -96,6 +112,35 @@ async def silent_db_watcher():
 @app.on_event("startup")
 async def start_watcher():
     asyncio.create_task(silent_db_watcher())
+    asyncio.create_task(silent_stock_watcher())
+
+async def silent_stock_watcher():
+    last_stock_state = {}
+    while True:
+        try:
+            from bson.objectid import ObjectId
+            import datetime
+            stocks = list(db.stocks.find({}, {"_id": 1, "quantity": 1}))
+            current_state = {str(s["_id"]): s.get("quantity", 0) for s in stocks}
+            
+            if last_stock_state:
+                for stock_id, current_qty in current_state.items():
+                    last_qty = last_stock_state.get(stock_id)
+                    if last_qty is not None and current_qty < last_qty:
+                        diff = last_qty - current_qty
+                        print(f"📦 AI Noticed stock {stock_id} reduced by {diff}! Logging history...")
+                        db.ai_stock_history.insert_one({
+                            "stock_id": ObjectId(stock_id),
+                            "quantity": diff,
+                            "action": "remove",
+                            "transaction_date": datetime.datetime.utcnow()
+                        })
+            
+            last_stock_state = current_state
+        except Exception as e:
+            print(f"❌ Stock Watcher Error: {e}")
+            
+        await asyncio.sleep(60)
 
 # -----------------------------------------------
 # 4. Debug & Admin Endpoints
@@ -119,17 +164,17 @@ async def rebuild_vector_db():
 # -----------------------------------------------
 # 5. LLM & Tools Setup
 # -----------------------------------------------
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
-
 # القائمة المحدثة للأدوات
 tools = [
     create_ticket, manage_stock, update_task_status,
     get_inventory, search_employee, get_my_tasks,
     get_sprint_status, get_my_tickets,
-    get_team_report, update_ticket_status
+    get_team_report, update_ticket_status,
+    create_project, get_projects, send_notification,
+    get_my_notifications, check_attendance, get_company_stats,
+    create_team, get_teams, create_backlog,
+    get_backlogs, create_task, create_sprint
 ]
-
-agent_llm = llm.bind_tools(tools)
 
 # -----------------------------------------------
 # 6. Main Endpoint (تحديث Multi-Tenancy)
@@ -147,6 +192,11 @@ def format_docs(docs):
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
+        # Load balancing across API keys
+        current_api_key = get_random_api_key()
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=current_api_key)
+        agent_llm = llm.bind_tools(tools)
+
         retriever = vector_db.as_retriever(search_kwargs={"k": 4, "filter": {"company_id": request.company_id}})
         docs = await retriever.ainvoke(request.query)
         context = format_docs(docs)
