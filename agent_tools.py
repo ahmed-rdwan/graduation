@@ -14,6 +14,19 @@ client["test"]
 client = MongoClient(os.getenv("MONGO_URI"))
 db = client["test"]
 
+from pymongo import ReturnDocument
+
+def get_next_custom_id(name: str, prefix: str) -> str:
+    counter = db.counters.find_one_and_update(
+        {"name": name},
+        {"$inc": {"seq": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER
+    )
+    return f"{prefix}{counter['seq']}"
+
+
+
 # -----------------------------------------
 # Tool 1: Create a Ticket (متاحة للكل)
 # -----------------------------------------
@@ -27,6 +40,7 @@ def create_ticket(title: str, description: str, priority: str, category: str, us
     db_category = category if category in valid_categories else "Hardware"
 
     new_ticket = {
+        "custom_id": get_next_custom_id("ticket", "tkt_"),
         "name": title,
         "description": description,
         "priority": db_priority,
@@ -271,6 +285,7 @@ def create_project(project_name: str, description: str, user_role: str, user_id:
         return "❌ Access Denied: Only Admins and Managers can create projects."
     
     db.projects.insert_one({
+        "custom_id": get_next_custom_id("project", "prj_"),
         "name": project_name,
         "description": description,
         "created_by": ObjectId(user_id),
@@ -409,6 +424,7 @@ def create_team(team_name: str, description: str, user_role: str, user_id: str, 
         return "❌ Access Denied: Only Admins and Managers can create teams."
         
     db.teams.insert_one({
+        "custom_id": get_next_custom_id("team", "tm_"),
         "name": team_name,
         "description": description,
         "members": [{"user": ObjectId(user_id), "role": "admin", "joined_at": datetime.datetime.utcnow()}],
@@ -448,6 +464,7 @@ def create_backlog(backlog_name: str, project_name: str, goal: str, user_role: s
         return f"❌ Error: Project '{project_name}' not found."
         
     db.backlogs.insert_one({
+        "custom_id": get_next_custom_id("backlog", "bkl_"),
         "name": backlog_name,
         "status": "open",
         "backlog_goal": goal,
@@ -495,6 +512,7 @@ def create_task(task_name: str, description: str, priority: str, project_name: s
     priority = priority if priority in valid_priorities else "Medium"
         
     db.tasks.insert_one({
+        "custom_id": get_next_custom_id("task", "tsk_"),
         "name": task_name,
         "description": description,
         "status": "todo",
@@ -525,6 +543,7 @@ def create_sprint(sprint_name: str, duration_days: int, project_name: str, user_
     end_date = start_date + datetime.timedelta(days=duration_days)
         
     db.sprints.insert_one({
+        "custom_id": get_next_custom_id("sprint", "spr_"),
         "name": sprint_name,
         "status": "planned",
         "start_date": start_date,

@@ -15,7 +15,7 @@ logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
 
 load_dotenv()
 client = MongoClient(os.getenv("MONGO_URI"))
-client["test"]
+db = client["test"]
 
 # إعدادات الموديل
 MIN_HISTORY_RECORDS = 5   # الحد الأدنى للسجلات عشان Prophet يتدرب
@@ -31,7 +31,8 @@ def prepare_daily_dataframe(history):
     df = pd.DataFrame(history)
 
     # تحويل التاريخ لـ يوم بس (بدون ساعات) عشان نجمع السحب اليومي
-    df["ds"] = pd.to_datetime(df["transaction_date"]).dt.normalize()
+    date_col = "timestamp" if "timestamp" in df.columns else "transaction_date"
+    df["ds"] = pd.to_datetime(df[date_col]).dt.normalize()
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
 
     # تجميع إجمالي السحب لكل يوم في صف واحد

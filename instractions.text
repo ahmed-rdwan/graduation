@@ -1,0 +1,62 @@
+طريقة التشغيل بالترتيب:
+
+بنستخدم موديل محلي ومجاني (HuggingFace) عشان نحول الداتا لـ Vectors ونخزنها في ChromaDB. لما المطور بيسأل سؤال، الـ ChromaDB بتفلتر الداتا دي كلها وتطلع أهم 3 أو 4 فقرات بس (الـ Context) وتبعته لموديل جوجل عشان يصيغ الإجابة. فمهما كبرت الداتا بيز بتاعتك، جوجل مبيوصلوش غير الكام سطر اللي فيهم الخلاصة.
+
+
+
+
+
+
+خطوات التشغيل النهائية (اعملهم بالترتيب ده):
+نزل المكتبات اللي هنحتاجها (افتح الـ Terminal في نفس الفولدر واكتب):
+
+ده باللوكال موديل 
+
+pip install fastapi uvicorn pydantic pymongo chromadb sentence-transformers langchain langchain-community langchain-google-genai requests
+
+
+
+ده من غير لوكال موديل
+
+
+pip install fastapi uvicorn pydantic pymongo chromadb langchain langchain-community langchain-google-genai requests python-dotenv
+
+
+
+
+
+
+
+ابني قاعدة البيانات الذكية:
+رن الملف الأول عشان يسحب الداتا من مونجو.
+
+python setup_vector_db.py
+
+
+
+شغل السيرفر:
+اكتب الأمر ده في الـ Terminal عشان السيرفر يشتغل ويفضل شغال
+
+uvicorn main:app --reload
+
+
+
+جرب النظام:
+افتح Terminal جديد (وسيب السيرفر شغال في الأولاني)، ورن ملف التيست:
+
+وفي تيرمينال تاني
+
+python test_api.py
+
+streamlit run app_chat.py
+
+
+
+
+
+عشان اعمل بيئه جديده
+
+C:\Users\PC\AppData\Local\Programs\Python\Python313\python.exe -m venv venv
+
+
+.\venv\Scripts\activate
