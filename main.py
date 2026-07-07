@@ -74,12 +74,21 @@ def load_vector_db():
 
 vector_db, doc_count = load_vector_db()
 
+import threading
+
+def background_setup():
+    print("⚠️ Vector DB is EMPTY — running setup in background...")
+    try:
+        from setup_vector_db import setup_database
+        setup_database()
+        global vector_db
+        vector_db, _ = load_vector_db()
+        print("✅ Background setup complete.")
+    except Exception as e:
+        print(f"❌ Background setup failed: {e}")
+
 if doc_count == 0:
-    print("⚠️ Vector DB is EMPTY — running setup now...")
-    from setup_vector_db import setup_database
-    setup_database()
-    vector_db, doc_count = load_vector_db()
-    print(f"✅ Setup complete — {doc_count} docs embedded.")
+    threading.Thread(target=background_setup, daemon=True).start()
 
 # -----------------------------------------------
 # 3. The Silent Watcher (Auto-Sync)
@@ -197,9 +206,11 @@ async def chat_endpoint(request: ChatRequest):
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=current_api_key)
         agent_llm = llm.bind_tools(tools)
 
-        retriever = vector_db.as_retriever(search_kwargs={"k": 4, "filter": {"company_id": request.company_id}})
-        docs = await retriever.ainvoke(request.query)
-        context = format_docs(docs)
+        context = "Database is currently syncing, context is temporarily unavailable."
+        if vector_db is not None:
+            retriever = vector_db.as_retriever(search_kwargs={"k": 4, "filter": {"company_id": request.company_id}})
+            docs = await retriever.ainvoke(request.query)
+            context = format_docs(docs)
 
         system_prompt = f"""You are an intelligent IT Management assistant.
 Current user: role='{request.user_role}', id='{request.user_id}', company_id='{request.company_id}'.
