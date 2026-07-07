@@ -164,10 +164,16 @@ def analyze_stock_item(stock):
     }
 
 
-def predict_stock_with_meta():
+from bson import ObjectId
+
+def predict_stock_with_meta(company_id: str = None):
     print("🤖 Meta Prophet AI Core Started...\n" + "="*40)
 
-    stocks = list(db.stocks.find())
+    query = {}
+    if company_id:
+        query["company_id"] = ObjectId(company_id) if len(company_id) == 24 else company_id
+
+    stocks = list(db.stocks.find(query))
 
     if not stocks:
         print("❌ No stock items found in the database.")

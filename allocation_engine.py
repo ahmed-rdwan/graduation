@@ -298,9 +298,9 @@ async def api_trigger_stock(background_tasks: BackgroundTasks):
     return {"message": "Meta Prophet AI started checking stock in the background."}
 
 @router.get("/api/ai/stock-predictions")
-async def api_get_stock_predictions():
+async def api_get_stock_predictions(company_id: str = None):
     try:
-        results = predict_stock_with_meta()
+        results = predict_stock_with_meta(company_id)
         return {
             "success": True, 
             "message": "Stock predictions generated successfully.", 
