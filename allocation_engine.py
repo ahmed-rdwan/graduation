@@ -215,16 +215,35 @@ async def api_assign_ticket(req: TicketAssignRequest):
         raise HTTPException(status_code=400, detail=result["msg"])
     return {"message": result["msg"], "assigned_user_id": result["assigned_to"]}
 
-class BulkTicketAssignRequest(BaseModel):
-    ticket_ids: list[str]
+class AutoAssignRequest(BaseModel):
+    company_id: str
 
-@router.post("/api/ai/assign-bulk-tickets")
-async def api_assign_bulk_tickets(req: BulkTicketAssignRequest):
+@router.post("/api/ai/auto-assign")
+async def api_auto_assign(req: AutoAssignRequest):
+    # Find all open tickets for this company that do not have an assignee
+    unassigned_tickets = list(db.tickets.find({
+        "company_id": ObjectId(req.company_id),
+        "status": "open",
+        "$or": [
+            {"assign_to": {"$exists": False}},
+            {"assign_to": None}
+        ]
+    }))
+
     results = []
-    for tid in req.ticket_ids:
+    assigned_count = 0
+    for t in unassigned_tickets:
+        tid = str(t["_id"])
         res = allocate_ticket_to_it(tid)
         results.append({"ticket_id": tid, "result": res})
-    return {"message": f"Processed {len(req.ticket_ids)} tickets.", "details": results}
+        if res.get("success"):
+            assigned_count += 1
+            
+    return {
+        "message": "Auto-assignment complete.", 
+        "assigned_count": assigned_count,
+        "details": results
+    }
 
 class TicketCreateRequest(BaseModel):
     title: str

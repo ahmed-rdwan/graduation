@@ -3,7 +3,8 @@ from prophet import Prophet
 from pymongo import MongoClient
 from datetime import datetime, timedelta
 import logging
-
+import uuid
+from datetime import timezone
 import os
 from dotenv import load_dotenv
 
@@ -64,6 +65,7 @@ def train_and_forecast(daily_df):
     return forecast
 
 
+
 def create_alert_ticket(item_name, current_qty, days_left, empty_date):
     """
     Opens an emergency ticket if stock is about to run out.
@@ -71,28 +73,42 @@ def create_alert_ticket(item_name, current_qty, days_left, empty_date):
     """
     ticket_title = f"AI Stock Alert: {item_name}"
 
-    # حماية من التكرار: لو في تيكت مفتوح بالفعل، نتخطى
-    existing = db.tickets.find_one({"name": ticket_title, "status": "Open"})
+    # حماية من التكرار (استخدمنا حروف صغيرة open عشان تطابق الداتا بيز)
+    existing = db.tickets.find_one({"name": ticket_title, "status": "open"})
     if existing:
         print(f"   ⏳ An open alert ticket already exists for this item. Skipping.")
         return
 
-    admin = db.users.find_one({"type": "admin"})
+    # جلب الإدمن (عدلناها لـ role بدل type لو الداتا بيز عندك كده)
+    admin = db.users.find_one({"role": "admin"}) 
+    if not admin:
+        admin = db.users.find_one({"type": "admin"}) # احتياطي
+        
     admin_id = admin["_id"] if admin else None
 
+    # توليد ID مستحيل يتكرر
+    now_utc = datetime.now(timezone.utc)
+    timestamp = int(now_utc.timestamp())
+    short_uuid = uuid.uuid4().hex[:6]
+    custom_ticket_id = f"tkt_alert_{timestamp}_{short_uuid}"
+
     db.tickets.insert_one({
+        "custom_id": custom_ticket_id,
         "name": ticket_title,
         "description": (
             f"AI System Warning: Current stock for '{item_name}' is ({current_qty}) units. "
             f"Based on the predicted consumption rate, stock is expected to run out in {days_left} days "
             f"(by {empty_date.strftime('%Y-%m-%d')}). Please contact suppliers immediately."
         ),
-        "priority": "High",
-        "status": "Open",
+        "priority": "high",
+        "status": "open",
+        "category": "Hardware",
         "created_by": admin_id,
-        "created_at": datetime.utcnow()
+        "createdAt": now_utc,
+        "updatedAt": now_utc
     })
     print(f"   🎟️ Emergency ticket created automatically.")
+
 
 
 def analyze_stock_item(stock):
