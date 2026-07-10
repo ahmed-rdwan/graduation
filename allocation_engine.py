@@ -32,7 +32,7 @@ def generate_custom_id(prefix: str) -> str:
 # 🧠 الخوارزمية الأساسية (The Brain) - Dynamic Load Balancing
 # ====================================================
 
-def _get_best_candidate(text_to_match: str, team_id: str = None, allowed_types: list = None) -> str:
+def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str = None, allowed_types: list = None) -> str:
     now_utc = datetime.now(timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
@@ -46,6 +46,10 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, allowed_types: 
         
         # تجاهل الموظف لو مش موجود أو حسابه مقفول
         if not user_info or not user_info.get("active", True):
+            continue
+
+        # 🔥 إغلاق ثغرة الـ Multi-Tenancy: الموظف لازم يكون في نفس الشركة
+        if company_id and str(user_info.get("company_id")) != str(company_id):
             continue
 
         if team_id and str(user_info.get("team_id")) != str(team_id):
@@ -75,6 +79,7 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, allowed_types: 
             "active_tasks": active_tasks
         })
 
+    # ... (باقي كود الدالة زي ما هو الـ TF-IDF وغيره) ...
     if not candidates:
         return None
 
@@ -98,7 +103,8 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, allowed_types: 
 
     best_idx = np.argmax(final_scores)
     return candidates[best_idx]["user_id"]
-
+            
+     
 def allocate_task_to_best_employee(task_id: str, team_id: str) -> dict:
     try:
         task = db.tasks.find_one({"_id": ObjectId(task_id)})
@@ -107,7 +113,8 @@ def allocate_task_to_best_employee(task_id: str, team_id: str) -> dict:
 
         task_text = f"{task.get('name', '')} {task.get('description', '')}".lower()
         
-        best_user_id = _get_best_candidate(task_text, team_id=team_id)
+        # 🔥 تمرير الشركة
+        best_user_id = _get_best_candidate(task_text, team_id=team_id, company_id=task.get("company_id"))
         
         if not best_user_id:
             return {"success": False, "msg": "No available and present employees found in this team."}
@@ -139,8 +146,10 @@ def allocate_ticket_to_it(ticket_id: str) -> dict:
 
         ticket_text = f"{ticket.get('name', '')} {ticket.get('description', '')}".lower()
         
-        best_user_id = _get_best_candidate(ticket_text, allowed_types=["admin", "manager", "developer"])
+        # 🔥 تمرير الشركة
+        best_user_id = _get_best_candidate(ticket_text, company_id=ticket.get("company_id"), allowed_types=["admin", "manager", "developer"])
         
+
         if not best_user_id:
             return {"success": False, "msg": "No available IT staff found to handle this ticket."}
 

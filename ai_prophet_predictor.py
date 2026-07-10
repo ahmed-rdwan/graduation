@@ -70,7 +70,7 @@ def create_alert_ticket(item_name, current_qty, days_left, empty_date):
     """
     Opens an emergency ticket if stock is about to run out.
     Checks first that no open ticket exists for the same item to prevent duplicates.
-    """
+    """ء    
     ticket_title = f"AI Stock Alert: {item_name}"
 
     # حماية من التكرار (استخدمنا حروف صغيرة open عشان تطابق الداتا بيز)
