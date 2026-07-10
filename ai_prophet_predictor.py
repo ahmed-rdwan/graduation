@@ -132,7 +132,10 @@ def analyze_stock_item(stock):
         return {"item_id": str(item_id), "item_name": item_name, "status": "empty", "current_qty": 0}
 
     # سحب سجلات الاستهلاك (remove بس، الـ add مش بيأثر على التوقع)
-    history = list(db.ai_stock_history.find({"stock_id": item_id, "action": "remove"}))
+    if "all_ids" in stock:
+        history = list(db.ai_stock_history.find({"stock_id": {"$in": stock["all_ids"]}, "action": "remove"}))
+    else:
+        history = list(db.ai_stock_history.find({"stock_id": item_id, "action": "remove"}))
 
     if len(history) < MIN_HISTORY_RECORDS:
         print(f"   📊 Insufficient data for training ({len(history)}/{MIN_HISTORY_RECORDS} records).")
@@ -184,6 +187,7 @@ from bson import ObjectId
 
 def predict_stock_with_meta(company_id: str = None):
     print("🤖 Meta Prophet AI Core Started...\n" + "="*40)
+    print(f"DEBUG: company_id received = {company_id}")
 
     query = {}
     if company_id:
@@ -195,8 +199,23 @@ def predict_stock_with_meta(company_id: str = None):
         print("❌ No stock items found in the database.")
         return
 
-    results = []
+    # Aggregate stocks by name to handle duplicates
+    aggregated = {}
     for stock in stocks:
+        name = stock.get("name", "Unknown")
+        if name not in aggregated:
+            aggregated[name] = {
+                "_id": stock["_id"],
+                "all_ids": [stock["_id"]],
+                "name": name,
+                "quantity": stock.get("quantity", 0)
+            }
+        else:
+            aggregated[name]["quantity"] += stock.get("quantity", 0)
+            aggregated[name]["all_ids"].append(stock["_id"])
+
+    results = []
+    for stock in aggregated.values():
         res = analyze_stock_item(stock)
         if res:
             results.append(res)
