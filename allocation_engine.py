@@ -311,19 +311,13 @@ async def api_complete_work(req: CompleteWorkRequest, background_tasks: Backgrou
 
     return {"message": "Work marked as completed. AI profile updated!"}
 
-# 1. تحديث الـ Model بتاع الـ Trigger
-class TriggerStockRequest(BaseModel):
-    company_id: str
-
-# 2. تحديث الإندبوينت بتاع الـ POST (بياخد الـ company_id ويبعته للـ Background Task)
 @router.post("/api/ai/trigger-stock-check")
-async def api_trigger_stock(req: TriggerStockRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(predict_stock_with_meta, req.company_id)
-    return {"message": "Meta Prophet AI started checking stock for this company."}
+async def api_trigger_stock(background_tasks: BackgroundTasks):
+    background_tasks.add_task(predict_stock_with_meta)
+    return {"message": "Meta Prophet AI started checking stock in the background."}
 
-# 3. تحديث الإندبوينت بتاع الـ GET (شلنا الـ = None عشان يبقى إجباري)
 @router.get("/api/ai/stock-predictions")
-async def api_get_stock_predictions(company_id: str):
+async def api_get_stock_predictions(company_id: str = None):
     try:
         results = predict_stock_with_meta(company_id)
         return {
@@ -477,11 +471,8 @@ async def api_extract_stock_usage(req: ExtractStockRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-from typing import List, Dict, Any, Optional
-
 class BreakdownRequest(BaseModel):
     description: str
-    members: Optional[List[Dict[str, Any]]] = None
 
 @router.post("/api/ai/breakdown-task")
 async def api_breakdown_task(req: BreakdownRequest):
@@ -497,16 +488,6 @@ async def api_breakdown_task(req: BreakdownRequest):
                 os.environ["GOOGLE_API_KEY"] = random.choice(key_list)
 
         llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
-        
-        members_context = ""
-        if req.members and len(req.members) > 0:
-            members_context = f"""
-        Here is a list of team members available for this project:
-        {json.dumps(req.members, indent=2)}
-        
-        Based on the tasks you create, you MUST also suggest the most suitable team member for each task by providing their ID in the "assignedTo" field. If no member is a good fit or the list is empty, return an empty string "" for "assignedTo".
-        """
-        
         prompt = f"""
         You are an expert Agile Scrum Master and Technical Lead. 
         A manager has provided the following high-level description for a project or large task:
@@ -514,11 +495,10 @@ async def api_breakdown_task(req: BreakdownRequest):
         
         Break this down into small, actionable tasks that can be assigned to team members.
         For each task, provide a "name" (short title), a "description", and a recommended "priority" (high, medium, low).
-        {members_context}
         
         Return ONLY a valid JSON array of objects, like this:
         [
-            {{"name": "Task Title", "description": "Detailed description...", "priority": "high", "assignedTo": "id_of_member_or_empty_string"}}
+            {{"name": "Task Title", "description": "Detailed description...", "priority": "high"}}
         ]
         Do not include markdown formatting or backticks around the JSON.
         """
