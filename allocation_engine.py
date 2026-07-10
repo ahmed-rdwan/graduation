@@ -311,13 +311,19 @@ async def api_complete_work(req: CompleteWorkRequest, background_tasks: Backgrou
 
     return {"message": "Work marked as completed. AI profile updated!"}
 
-@router.post("/api/ai/trigger-stock-check")
-async def api_trigger_stock(background_tasks: BackgroundTasks):
-    background_tasks.add_task(predict_stock_with_meta)
-    return {"message": "Meta Prophet AI started checking stock in the background."}
+# 1. تحديث الـ Model بتاع الـ Trigger
+class TriggerStockRequest(BaseModel):
+    company_id: str
 
+# 2. تحديث الإندبوينت بتاع الـ POST (بياخد الـ company_id ويبعته للـ Background Task)
+@router.post("/api/ai/trigger-stock-check")
+async def api_trigger_stock(req: TriggerStockRequest, background_tasks: BackgroundTasks):
+    background_tasks.add_task(predict_stock_with_meta, req.company_id)
+    return {"message": "Meta Prophet AI started checking stock for this company."}
+
+# 3. تحديث الإندبوينت بتاع الـ GET (شلنا الـ = None عشان يبقى إجباري)
 @router.get("/api/ai/stock-predictions")
-async def api_get_stock_predictions(company_id: str = None):
+async def api_get_stock_predictions(company_id: str):
     try:
         results = predict_stock_with_meta(company_id)
         return {
