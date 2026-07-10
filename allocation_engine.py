@@ -540,18 +540,19 @@ async def api_breakdown_task(req: BreakdownRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-from typing import List
+from typing import List, Optional
 
 class TaskItem(BaseModel):
     name: str
     description: str
     priority: str
-    assigned_to: str # ObjectId string
+    assigned_to: Optional[str] = None
     backlog_id: str # ObjectId string
 
 class BulkCreateTasksRequest(BaseModel):
     company_id: str
     created_by: str
+    auto_assign: bool = False
     tasks: List[TaskItem]
 
 @router.post("/api/ai/bulk-create-tasks")
@@ -560,14 +561,15 @@ async def api_bulk_create_tasks(req: BulkCreateTasksRequest):
         from datetime import datetime
         new_tasks = []
         for t in req.tasks:
+            assigned = bool(t.assigned_to)
             task_doc = {
                 "custom_id": generate_custom_id("tsk"),
                 "name": t.name,
                 "description": t.description,
                 "priority": t.priority,
                 "status": "todo",
-                "assigned_to": [ObjectId(t.assigned_to)],
-                "assigned": True,
+                "assigned_to": [ObjectId(t.assigned_to)] if assigned else [],
+                "assigned": assigned,
                 "backlog_id": ObjectId(t.backlog_id),
                 "created_by": ObjectId(req.created_by),
                 "company_id": ObjectId(req.company_id),
@@ -578,7 +580,11 @@ async def api_bulk_create_tasks(req: BulkCreateTasksRequest):
             
         if new_tasks:
             db.tasks.insert_many(new_tasks)
+            if req.auto_assign:
+                for doc in new_tasks:
+                    if not doc.get("assigned"):
+                        allocate_task_to_best_employee(str(doc["_id"]), team_id=None)
             
-        return {"success": True, "message": f"Successfully created {len(new_tasks)} tasks and assigned them."}
+        return {"success": True, "message": f"Successfully created {len(new_tasks)} tasks."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
