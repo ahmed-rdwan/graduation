@@ -328,6 +328,21 @@ async def api_get_stock_predictions(company_id: str = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/api/ai/debug-stocks")
+async def debug_stocks():
+    """Temporary debug endpoint to inspect stock company_ids"""
+    stocks = list(db.stocks.find({}, {"_id": 1, "name": 1, "company_id": 1, "quantity": 1}))
+    result = []
+    for s in stocks:
+        result.append({
+            "stock_id": str(s["_id"]),
+            "name": s.get("name", "?"),
+            "company_id": str(s.get("company_id", "MISSING")),
+            "company_id_type": type(s.get("company_id")).__name__,
+            "quantity": s.get("quantity", 0)
+        })
+    return {"total": len(result), "stocks": result}
+
 class HelpSolveRequest(BaseModel):
     details: str = ""
     context: str = "project management task"
