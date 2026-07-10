@@ -32,20 +32,20 @@ def generate_custom_id(prefix: str) -> str:
 # 🧠 الخوارزمية الأساسية (The Brain) - Dynamic Load Balancing
 # ====================================================
 
-def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str = None, allowed_types: list = None) -> str:
+def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str = None, allowed_types: list = None, excluded_types: list = None) -> str:
     now_utc = datetime.now(timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
     
-    profiles = list(db.ai_employee_profile.find())
+    # بنجيب كل الموظفين مش بس اللي ليهم بروفايل ذكاء اصطناعي
+    users = list(db.users.find())
     candidates = []
     
-    for profile in profiles:
-        user_id = profile["user_id"]
-        user_info = db.users.find_one({"_id": user_id})
+    for user_info in users:
+        user_id = user_info["_id"]
         
         # تجاهل الموظف لو مش موجود أو حسابه مقفول
-        if not user_info or not user_info.get("active", True):
+        if not user_info.get("active", True):
             continue
 
         # 🔥 إغلاق ثغرة الـ Multi-Tenancy: الموظف لازم يكون في نفس الشركة
@@ -56,6 +56,9 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
             continue
             
         if allowed_types and user_info.get("role") not in allowed_types:
+            continue
+            
+        if excluded_types and user_info.get("role") in excluded_types:
             continue
             
         is_present = db.schedules.find_one({
@@ -72,10 +75,14 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
             continue 
             
         active_tasks = db.workingtasks.count_documents({"user_id": user_id, "status": "active"})
+        
+        # لو ملوش بروفايل هنعتبر تاريخه "general support"
+        profile = db.ai_employee_profile.find_one({"user_id": user_id})
+        history_text = profile.get("solved_history_text", "general support") if profile else "general support"
             
         candidates.append({
             "user_id": user_id,
-            "solved_history": profile.get("solved_history_text", "general support"),
+            "solved_history": history_text,
             "active_tasks": active_tasks
         })
 
@@ -146,12 +153,12 @@ def allocate_ticket_to_it(ticket_id: str) -> dict:
 
         ticket_text = f"{ticket.get('name', '')} {ticket.get('description', '')}".lower()
         
-        # 🔥 تمرير الشركة
-        best_user_id = _get_best_candidate(ticket_text, company_id=ticket.get("company_id"), allowed_types=["admin", "manager", "developer"])
+        # 🔥 تمرير الشركة واستثناء المانجر
+        best_user_id = _get_best_candidate(ticket_text, company_id=ticket.get("company_id"), excluded_types=["manager"])
         
 
         if not best_user_id:
-            return {"success": False, "msg": "No available IT staff found to handle this ticket."}
+            return {"success": False, "msg": "No available staff found to handle this ticket."}
 
         now_utc = datetime.now(timezone.utc)
         db.workingtasks.insert_one({
