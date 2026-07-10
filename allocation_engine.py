@@ -40,6 +40,8 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
     # بنجيب كل الموظفين مش بس اللي ليهم بروفايل ذكاء اصطناعي
     users = list(db.users.find())
     candidates = []
+    present_candidates = []
+    all_candidates = []
     
     for user_info in users:
         user_id = user_info["_id"]
@@ -61,6 +63,20 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
         if excluded_types and user_info.get("role") in excluded_types:
             continue
             
+        active_tasks = db.workingtasks.count_documents({"user_id": user_id, "status": "active"})
+        
+        # لو ملوش بروفايل هنعتبر تاريخه "general support"
+        profile = db.ai_employee_profile.find_one({"user_id": user_id})
+        history_text = profile.get("solved_history_text", "general support") if profile else "general support"
+            
+        candidate_data = {
+            "user_id": user_id,
+            "solved_history": history_text,
+            "active_tasks": active_tasks
+        }
+        
+        all_candidates.append(candidate_data)
+        
         is_present = db.schedules.find_one({
             "user_id": user_id,
             "entries": {
@@ -71,20 +87,11 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
             }
         })
         
-        if not is_present:
-            continue 
-            
-        active_tasks = db.workingtasks.count_documents({"user_id": user_id, "status": "active"})
-        
-        # لو ملوش بروفايل هنعتبر تاريخه "general support"
-        profile = db.ai_employee_profile.find_one({"user_id": user_id})
-        history_text = profile.get("solved_history_text", "general support") if profile else "general support"
-            
-        candidates.append({
-            "user_id": user_id,
-            "solved_history": history_text,
-            "active_tasks": active_tasks
-        })
+        if is_present:
+            present_candidates.append(candidate_data)
+
+    # لو فيه حد حاضر، نوزع عليهم، لو مفيش، نوزع على الكل
+    candidates = present_candidates if present_candidates else all_candidates
 
     # ... (باقي كود الدالة زي ما هو الـ TF-IDF وغيره) ...
     if not candidates:
