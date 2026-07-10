@@ -145,7 +145,7 @@ def allocate_task_to_best_employee(task_id: str, team_id: str) -> dict:
             "end_date": None,
             "status": "active"
         })
-        db.tasks.update_one({"_id": task["_id"]}, {"$set": {"assigned": True, "status": "in_progress"}})
+        db.tasks.update_one({"_id": task["_id"]}, {"$set": {"assigned": True, "status": "todo", "assigned_to": [ObjectId(best_user_id)]}})
         
         return {"success": True, "msg": "Task successfully assigned.", "assigned_to": str(best_user_id)}
     except Exception as e:
@@ -444,14 +444,20 @@ async def api_extract_stock_usage(req: ExtractStockRequest):
             if key_list:
                 os.environ["GOOGLE_API_KEY"] = random.choice(key_list)
 
-        # 1. Fetch Task Comment
+        # 1. Fetch Task/Ticket Comment
         task = db.tasks.find_one({"_id": ObjectId(req.task_id)})
-        if not task:
-            return {"success": False, "message": "Task not found."}
+        comment = ""
+        if task:
+            comment = task.get("comment", "")
+        else:
+            ticket = db.tickets.find_one({"_id": ObjectId(req.task_id)})
+            if ticket:
+                comment = ticket.get("resolution", "")
+            else:
+                return {"success": False, "message": "Task/Ticket not found."}
             
-        comment = task.get("comment", "")
         if not comment:
-            return {"success": False, "message": "No comment/description found in this task.", "used_items": []}
+            return {"success": False, "message": "No comment/resolution found.", "used_items": []}
 
         # 2. Fetch Company Stock
         stocks = list(db.stocks.find({"company_id": ObjectId(req.company_id)}, {"name": 1}))
