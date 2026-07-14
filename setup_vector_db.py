@@ -84,7 +84,7 @@ def setup_database():
     for i in range(0, len(documents), batch_size):
         # 🔄 اختيار مفتاح عشوائي لكل Batch عشان نوزع الحمل!
         current_key = get_random_embedding_key()
-        embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001", google_api_key=current_key)
+        embeddings = GoogleGenerativeAIEmbeddings(model="text-embedding-004", google_api_key=current_key)
         vector_db = Chroma(embedding_function=embeddings, persist_directory="./chroma_db")
         
         batch = documents[i:i+batch_size]
