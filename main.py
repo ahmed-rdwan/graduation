@@ -116,7 +116,7 @@ async def silent_db_watcher():
         except Exception as e:
             print(f"❌ Watcher Error: {e}")
 
-        await asyncio.sleep(900)
+        await asyncio.sleep(60)
 
 @app.on_event("startup")
 async def start_watcher():

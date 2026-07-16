@@ -69,7 +69,7 @@ def setup_database():
         ))
    
     
-    # حماية من الداتا بيز الفاضية
+# حماية من الداتا بيز الفاضية
     if len(documents) == 0:
         print("⚠️ Warning: MongoDB is completely empty. Adding a dummy document to initialize ChromaDB.")
         documents.append(Document(
@@ -77,25 +77,21 @@ def setup_database():
             metadata={"source_id": "dummy_0", "type": "system"}
         ))
 
-    print("Embedding in small batches to bypass Google limits...")
+    print("🚀 Embedding all documents at once (Paid Tier Mode)...")
     
-    # تقسيم الملفات عشان جوجل (Batching)
-    batch_size = 15 
-    for i in range(0, len(documents), batch_size):
-        # 🔄 اختيار مفتاح عشوائي لكل Batch عشان نوزع الحمل!
-        current_key = get_random_embedding_key()
-        embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-2", google_api_key=current_key)
-        vector_db = Chroma(embedding_function=embeddings, persist_directory="./chroma_db")
-        
-        batch = documents[i:i+batch_size]
-        vector_db.add_documents(batch)
-        print(f"✅ Embedded {min(i + batch_size, len(documents))} / {len(documents)} using key {current_key[:15]}...")
-        
-        # وقت راحة للـ API عشان ميضربش Rate Limit
-        if i + batch_size < len(documents):
-            time.sleep(15)
-
-    print("🎉 Database setup complete and embedded successfully with Google!")
+    # اختيار مفتاح (مابقاش في داعي نبدل المفاتيح كتير لأن الليمت بقى مفتوح)
+    current_key = get_random_embedding_key()
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2", google_api_key=current_key)
+    
+    # بناء الداتا بيز وحقن كل الملفات دفعة واحدة (بدون Loop ولا Sleep)
+    vector_db = Chroma.from_documents(
+        documents=documents,
+        embedding=embeddings,
+        persist_directory="./chroma_db"
+    )
+    
+    print(f"✅ Successfully embedded all {len(documents)} documents in record time!")
 
 if __name__ == "__main__":
     setup_database()
+
