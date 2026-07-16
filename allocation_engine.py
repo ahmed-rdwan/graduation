@@ -85,13 +85,18 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
             "status": {"$in": ["todo", "in_progress", "in-progress"]}
         })
 
+        active_tickets = db.tickets.count_documents({
+            "assign_to": ObjectId(user_id),
+            "status": {"$in": ["open", "in_progress", "in-progress"]}
+        })
+
         profile = db.ai_employee_profile.find_one({"user_id": user_id})
         history_text = profile.get("solved_history_text", "general support") if profile else "general support"
             
         candidate_data = {
             "user_id": user_id,
             "solved_history": history_text,
-            "active_tasks": active_tasks
+            "active_tasks": active_tasks + active_tickets
         }
         
         all_candidates.append(candidate_data)
@@ -197,8 +202,8 @@ def allocate_ticket_to_it(ticket_id: str) -> dict:
 
         ticket_text = f"{ticket.get('name', '')} {ticket.get('description', '')}".lower()
         
-        # 🔥 تمرير الشركة واستثناء المانجر
-        best_user_id = _get_best_candidate(ticket_text, company_id=ticket.get("company_id"), excluded_types=["manager"])
+        # 🔥 تمرير الشركة واستثناء المانجر وتحديد القسم
+        best_user_id = _get_best_candidate(ticket_text, company_id=ticket.get("company_id"), excluded_types=["manager"], target_dep="it")
         
 
         if not best_user_id:
