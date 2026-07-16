@@ -77,20 +77,22 @@ def setup_database():
             metadata={"source_id": "dummy_0", "type": "system"}
         ))
 
-    print("🚀 Embedding all documents at once (Paid Tier Mode)...")
+    print("🚀 Embedding documents in fast batches (Paid Tier Mode)...")
     
-    # اختيار مفتاح (مابقاش في داعي نبدل المفاتيح كتير لأن الليمت بقى مفتوح)
     current_key = get_random_embedding_key()
     embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2", google_api_key=current_key)
     
-    # بناء الداتا بيز وحقن كل الملفات دفعة واحدة (بدون Loop ولا Sleep)
-    vector_db = Chroma.from_documents(
-        documents=documents,
-        embedding=embeddings,
-        persist_directory="./chroma_db"
-    )
+    # 1. بنجهز الداتا بيز الأول
+    vector_db = Chroma(embedding_function=embeddings, persist_directory="./chroma_db")
     
-    print(f"✅ Successfully embedded all {len(documents)} documents in record time!")
+    # 2. بنبعت الملفات 100 بـ 100 لجوجل (بدون أي وقت انتظار Sleep)
+    batch_size = 100
+    for i in range(0, len(documents), batch_size):
+        batch = documents[i:i+batch_size]
+        vector_db.add_documents(batch)
+        print(f"✅ Embedded {min(i + batch_size, len(documents))} / {len(documents)}...")
+        
+    print(f"🎉 Successfully embedded all {len(documents)} documents in record time!")
 
 if __name__ == "__main__":
     setup_database()
