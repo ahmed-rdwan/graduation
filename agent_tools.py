@@ -358,38 +358,56 @@ def get_my_notifications(user_role: str, user_id: str, company_id: str) -> str:
 # -----------------------------------------
 # Tool 15: Check Attendance (للإدمن والمدير فقط)
 # -----------------------------------------
+
+    
+# -----------------------------------------
+# Tool 15: Check Attendance (للإدمن والمدير فقط)
+# -----------------------------------------
 @tool
 def check_attendance(user_role: str, user_id: str, company_id: str) -> str:
-    """Checks who is present today."""
+    """Retrieves all attendance and presence records for employees in the company."""
     if user_role not in ["admin", "manager"]:
         return "❌ Access Denied: Only Admins and Managers can view attendance."
         
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
-    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = today_start + datetime.timedelta(days=1)
-    
-    # Find all schedules for today with 'arrived'
-    schedules = list(db.schedules.find({
-        "company_id": ObjectId(company_id),
-        "entries": {
-            "$elemMatch": {
-                "date": {"$gte": today_start, "$lt": today_end},
-                "shift_type": "arrived"
-            }
-        }
-    }))
+    schedules = list(db.schedules.find({"company_id": ObjectId(company_id)}))
     
     if not schedules:
-        return "Nobody has checked in today yet."
+        return "No attendance records found for this company."
         
     present_user_ids = [s["user_id"] for s in schedules]
     users = list(db.users.find({"_id": {"$in": present_user_ids}}))
+    user_dict = {str(u["_id"]): u.get("name", "Unknown") for u in users}
     
-    report = ["⏰ Present Today:"]
-    for u in users:
-        report.append(f"  - {u.get('name')} ({u.get('role', 'user')})")
+    report = ["⏰ Company Attendance Records:"]
+    found_any = False
+    
+    for s in schedules:
+        emp_name = user_dict.get(str(s["user_id"]), "Unknown Employee")
+        attendance_details = []
+        
+        for entry in s.get("entries", []):
+            # بنقرأ نوع الشيفت من الداتا بيز
+            shift = str(entry.get("shift_type", "")).lower()
+            
+            # لو الشيفت أي واحد من دول، يبقى الموظف حضر
+            if shift in ["morning", "afternoon", "night", "arrived"]:
+                d = entry.get("date")
+                if d:
+                    date_str = d.strftime("%Y-%m-%d")
+                    # بنحط التاريخ وجنبه نوع الشيفت
+                    attendance_details.append(f"{date_str} ({shift.capitalize()})")
+                    
+        if attendance_details:
+            found_any = True
+            unique_details = sorted(list(set(attendance_details))) 
+            report.append(f"  - 👤 {emp_name}: {', '.join(unique_details)}")
+            
+    if not found_any:
+        return "Nobody has marked attendance yet in this company."
+        
     return "\n".join(report)
 
+    
 # -----------------------------------------
 # Tool 16: Get Company Stats (للإدمن والمدير فقط)
 # -----------------------------------------

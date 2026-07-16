@@ -77,12 +77,13 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
         
         all_candidates.append(candidate_data)
         
+        # نختبر حضوره النهاردة (تعديل عشان يقرا الشفتات الفعلية)
         is_present = db.schedules.find_one({
             "user_id": user_id,
             "entries": {
                 "$elemMatch": {
                     "date": {"$gte": today_start, "$lt": today_end},
-                    "shift_type": "arrived"
+                    "shift_type": {"$in": ["morning", "afternoon", "night", "arrived"]}
                 }
             }
         })
@@ -384,7 +385,7 @@ async def api_help_solve(req: HelpSolveRequest):
             if key_list:
                 os.environ["GOOGLE_API_KEY"] = random.choice(key_list)
 
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.7)
         
         task_info = req.details
         
@@ -467,7 +468,7 @@ async def api_extract_stock_usage(req: ExtractStockRequest):
             return {"success": False, "message": "No stock available in company.", "used_items": []}
 
         # 3. Ask AI to extract usage based on the actual stock list
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0)
         prompt = f"""
         You are a smart inventory assistant.
         The employee wrote the following comment after completing a task:
@@ -516,7 +517,7 @@ async def api_breakdown_task(req: BreakdownRequest):
             if key_list:
                 os.environ["GOOGLE_API_KEY"] = random.choice(key_list)
 
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.7)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.7)
         prompt = f"""
         You are an expert Agile Scrum Master and Technical Lead. 
         A manager has provided the following high-level description for a project or large task:

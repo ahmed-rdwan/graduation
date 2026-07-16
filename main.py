@@ -58,7 +58,7 @@ app.add_middleware(
 # -----------------------------------------------
 # 2. RAG Setup & Claude's Auto-Build
 # -----------------------------------------------
-embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-2")
 
 def load_vector_db():
     db_path = "./chroma_db"
@@ -203,7 +203,7 @@ async def chat_endpoint(request: ChatRequest):
     try:
         # Load balancing across API keys
         current_api_key = get_random_api_key()
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=current_api_key)
+        llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0, google_api_key=current_api_key)
         agent_llm = llm.bind_tools(tools)
 
         context = "Database is currently syncing, context is temporarily unavailable."
