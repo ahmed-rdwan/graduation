@@ -32,7 +32,9 @@ def generate_custom_id(prefix: str) -> str:
 # 🧠 الخوارزمية الأساسية (The Brain) - Dynamic Load Balancing
 # ====================================================
 
-def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str = None, allowed_types: list = None, excluded_types: list = None) -> str:
+
+
+def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str = None, allowed_types: list = None, excluded_types: list = None, target_dep: str = None) -> str:
     now_utc = datetime.now(timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
@@ -54,7 +56,12 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
         if company_id and str(user_info.get("company_id")) != str(company_id):
             continue
 
+        # 🔥 التأكد من التيم (لو مبعوت)
         if team_id and str(user_info.get("team_id")) != str(team_id):
+            continue
+            
+        # ✅ التعديل الجديد: التأكد من القسم (لو مبعوت)
+        if target_dep and str(user_info.get("dep", "")).lower() != target_dep.lower():
             continue
             
         if allowed_types and user_info.get("role") not in allowed_types:
@@ -62,9 +69,10 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
             
         if excluded_types and user_info.get("role") in excluded_types:
             continue
-            
-        active_tasks = db.workingtasks.count_documents({"user_id": user_id, "status": "active"})
-        
+
+
+
+
         # لو ملوش بروفايل هنعتبر تاريخه "general support"
         profile = db.ai_employee_profile.find_one({"user_id": user_id})
         history_text = profile.get("solved_history_text", "general support") if profile else "general support"
@@ -129,8 +137,10 @@ def allocate_task_to_best_employee(task_id: str, team_id: str) -> dict:
         task_text = f"{task.get('name', '')} {task.get('description', '')}".lower()
         
         # 🔥 تمرير الشركة
-        best_user_id = _get_best_candidate(task_text, team_id=team_id, company_id=task.get("company_id"))
-        
+   # 🔥 تمرير الشركة، استثناء المانجر، وإجبار السيستم يختار من قسم الـ IT
+        best_user_id = _get_best_candidate(ticket_text, company_id=ticket.get("company_id"), excluded_types=["manager"], target_dep="it")
+
+
         if not best_user_id:
             return {"success": False, "msg": "No available and present employees found in this team."}
 
@@ -556,9 +566,15 @@ class TaskItem(BaseModel):
     assigned_to: Optional[str] = None
     backlog_id: str # ObjectId string
 
+
+
+
+    
+
 class BulkCreateTasksRequest(BaseModel):
     company_id: str
     created_by: str
+    team_id: str = None  # ✅ ضفنا التيم عشان الفرونت إند يبعته
     auto_assign: bool = False
     tasks: List[TaskItem]
 
@@ -590,7 +606,8 @@ async def api_bulk_create_tasks(req: BulkCreateTasksRequest):
             if req.auto_assign:
                 for doc in new_tasks:
                     if not doc.get("assigned"):
-                        allocate_task_to_best_employee(str(doc["_id"]), team_id=None)
+                        # ✅ التعديل هنا: نبعت التيم اللي اليوزر شغال فيه بدل None
+                        allocate_task_to_best_employee(str(doc["_id"]), team_id=req.team_id)
             
         return {"success": True, "message": f"Successfully created {len(new_tasks)} tasks."}
     except Exception as e:
