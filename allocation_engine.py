@@ -34,12 +34,23 @@ def generate_custom_id(prefix: str) -> str:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str = None, allowed_types: list = None, excluded_types: list = None, target_dep: str = None) -> str:
     now_utc = datetime.now(timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
     
-    # بنجيب كل الموظفين مش بس اللي ليهم بروفايل ذكاء اصطناعي
     users = list(db.users.find())
     candidates = []
     present_candidates = []
@@ -48,20 +59,18 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
     for user_info in users:
         user_id = user_info["_id"]
         
-        # تجاهل الموظف لو مش موجود أو حسابه مقفول
         if not user_info.get("active", True):
             continue
 
-        # 🔥 إغلاق ثغرة الـ Multi-Tenancy: الموظف لازم يكون في نفس الشركة
         if company_id and str(user_info.get("company_id")) != str(company_id):
             continue
 
-        # 🔥 التأكد من التيم (لو مبعوت)
         if team_id and str(user_info.get("team_id")) != str(team_id):
             continue
             
-        # ✅ التعديل الجديد: التأكد من القسم (لو مبعوت)
-        if target_dep and str(user_info.get("dep", "")).lower() != target_dep.lower():
+        # ✅ قراءة القسم صح (dept أو dep)
+        user_dept = str(user_info.get("dept", user_info.get("dep", ""))).lower().strip()
+        if target_dep and user_dept != target_dep.lower():
             continue
             
         if allowed_types and user_info.get("role") not in allowed_types:
@@ -70,10 +79,12 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
         if excluded_types and user_info.get("role") in excluded_types:
             continue
 
+        # ✅ حساب الشغل الحالي بدقة
+        active_tasks = db.tasks.count_documents({
+            "assigned_to": ObjectId(user_id),
+            "status": {"$in": ["todo", "in_progress", "in-progress"]}
+        })
 
-
-
-        # لو ملوش بروفايل هنعتبر تاريخه "general support"
         profile = db.ai_employee_profile.find_one({"user_id": user_id})
         history_text = profile.get("solved_history_text", "general support") if profile else "general support"
             
@@ -85,7 +96,6 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
         
         all_candidates.append(candidate_data)
         
-        # نختبر حضوره النهاردة (تعديل عشان يقرا الشفتات الفعلية)
         is_present = db.schedules.find_one({
             "user_id": user_id,
             "entries": {
@@ -99,10 +109,8 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
         if is_present:
             present_candidates.append(candidate_data)
 
-    # لو فيه حد حاضر، نوزع عليهم، لو مفيش، نوزع على الكل
     candidates = present_candidates if present_candidates else all_candidates
 
-    # ... (باقي كود الدالة زي ما هو الـ TF-IDF وغيره) ...
     if not candidates:
         return None
 
@@ -126,8 +134,15 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
 
     best_idx = np.argmax(final_scores)
     return candidates[best_idx]["user_id"]
+
+
+
             
      
+
+
+
+
 def allocate_task_to_best_employee(task_id: str, team_id: str) -> dict:
     try:
         task = db.tasks.find_one({"_id": ObjectId(task_id)})
@@ -136,17 +151,14 @@ def allocate_task_to_best_employee(task_id: str, team_id: str) -> dict:
 
         task_text = f"{task.get('name', '')} {task.get('description', '')}".lower()
         
-        # 🔥 تمرير الشركة
-   # 🔥 تمرير الشركة، استثناء المانجر، وإجبار السيستم يختار من قسم الـ IT
-        best_user_id = _get_best_candidate(ticket_text, company_id=ticket.get("company_id"), excluded_types=["manager"], target_dep="it")
-
+        # ✅ استدعاء العقل المدبر صح للتاسكات (مفيش target_dep هنا)
+        best_user_id = _get_best_candidate(task_text, team_id=team_id, company_id=task.get("company_id"))
 
         if not best_user_id:
             return {"success": False, "msg": "No available and present employees found in this team."}
 
         now_utc = datetime.now(timezone.utc)
         
-        # إضافة التاسك بـ ID برودكشن
         db.workingtasks.insert_one({
             "custom_id": generate_custom_id("wt_ai"), 
             "task_id": task["_id"],
@@ -162,6 +174,20 @@ def allocate_task_to_best_employee(task_id: str, team_id: str) -> dict:
     except Exception as e:
         print(f"❌ Server Error during task allocation: {e}")
         return {"success": False, "msg": "Internal Server Error during allocation."}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def allocate_ticket_to_it(ticket_id: str) -> dict:
     try:
@@ -569,7 +595,7 @@ class TaskItem(BaseModel):
 
 
 
-    
+
 
 class BulkCreateTasksRequest(BaseModel):
     company_id: str
