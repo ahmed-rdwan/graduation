@@ -46,11 +46,32 @@ def generate_custom_id(prefix: str) -> str:
 
 
 
+def _get_team_member_ids(team_id: str) -> set:
+    """FIX: membership lives in the team document's `members` array,
+    not in a `team_id` field on the user. Returns member ids as strings."""
+    ids = set()
+    if not team_id:
+        return ids
+    try:
+        team = db.teams.find_one({"_id": ObjectId(team_id)})
+    except Exception:
+        team = None
+    if team:
+        for m in team.get("members", []):
+            if isinstance(m, dict):
+                m = m.get("user") or m.get("user_id") or m.get("_id")
+            if m:
+                ids.add(str(m))
+    return ids
+
+
 def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str = None, allowed_types: list = None, excluded_types: list = None, target_dep: str = None) -> str:
     now_utc = datetime.now(timezone.utc)
     today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
-    
+
+    team_member_ids = _get_team_member_ids(team_id)
+
     users = list(db.users.find())
     candidates = []
     present_candidates = []
@@ -65,8 +86,15 @@ def _get_best_candidate(text_to_match: str, team_id: str = None, company_id: str
         if company_id and str(user_info.get("company_id")) != str(company_id):
             continue
 
-        if team_id and str(user_info.get("team_id")) != str(team_id):
-            continue
+        # FIX: a user belongs to the team if their id is in the team's
+        # members array OR (legacy) they carry a matching team_id field.
+        if team_id:
+            in_team = (
+                str(user_id) in team_member_ids
+                or str(user_info.get("team_id")) == str(team_id)
+            )
+            if not in_team:
+                continue
             
         # ✅ قراءة القسم صح (dept أو dep)
         user_dept = str(user_info.get("dept", user_info.get("dep", ""))).lower().strip()
@@ -265,10 +293,27 @@ class BulkTaskAssignRequest(BaseModel):
 @router.post("/api/ai/assign-bulk-tasks")
 async def api_assign_bulk_tasks(req: BulkTaskAssignRequest):
     results = []
+    assigned_count = 0
     for tid in req.task_ids:
         res = allocate_task_to_best_employee(tid, req.team_id)
         results.append({"task_id": tid, "result": res})
-    return {"message": f"Processed {len(req.task_ids)} tasks.", "details": results}
+        if res.get("success"):
+            assigned_count += 1
+
+    # FIX: previously this returned HTTP 200 "Processed N tasks." even when
+    # every allocation failed, so the frontend showed success with 0 assigned.
+    if req.task_ids and assigned_count == 0:
+        first_msg = results[0]["result"].get("msg", "Assignment failed.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"No tasks were assigned. Reason: {first_msg}",
+        )
+
+    return {
+        "message": f"Assigned {assigned_count} of {len(req.task_ids)} tasks.",
+        "assigned_count": assigned_count,
+        "details": results,
+    }
 
 class TicketAssignRequest(BaseModel):
     ticket_id: str
@@ -642,4 +687,4 @@ async def api_bulk_create_tasks(req: BulkCreateTasksRequest):
             
         return {"success": True, "message": f"Successfully created {len(new_tasks)} tasks."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
