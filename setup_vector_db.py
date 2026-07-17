@@ -32,27 +32,27 @@ def setup_database():
     # --- 1. Users ---
     for user in db["users"].find():
         content = f"User Name: {user.get('name', 'Unknown')}, Role: {user.get('role', 'user')}, Email: {user.get('email', 'Unknown')}."
-        documents.append(Document(page_content=content, metadata={"source_id": str(user["_id"]), "type": "user"}))
+        documents.append(Document(page_content=content, metadata={"source_id": str(user["_id"]), "type": "user", "company_id": str(user.get("company_id", ""))}))
 
     # --- 2. Teams ---
     for team in db["teams"].find():
         content = f"Team Name: {team.get('name', 'Unknown')}, Description: {team.get('description', '')}"
-        documents.append(Document(page_content=content, metadata={"source_id": str(team["_id"]), "type": "team"}))
+        documents.append(Document(page_content=content, metadata={"source_id": str(team["_id"]), "type": "team", "company_id": str(team.get("company_id", ""))}))
 
     # --- 3. Projects ---
     for project in db["projects"].find():
         content = f"Project Name: {project.get('name', 'Unknown')}, Description: {project.get('description', '')}"
-        documents.append(Document(page_content=content, metadata={"source_id": str(project["_id"]), "type": "project"}))
+        documents.append(Document(page_content=content, metadata={"source_id": str(project["_id"]), "type": "project", "company_id": str(project.get("company_id", ""))}))
 
     # --- 4. Tasks ---
     for task in db["tasks"].find():
         content = f"Task Name: {task.get('name', 'Unknown')}, Priority: {task.get('priority', 'medium')}, Status: {task.get('status', 'todo')}, Description: {task.get('description', '')}"
-        documents.append(Document(page_content=content, metadata={"source_id": str(task["_id"]), "type": "task"}))
+        documents.append(Document(page_content=content, metadata={"source_id": str(task["_id"]), "type": "task", "company_id": str(task.get("company_id", ""))}))
 
     # --- 5. Tickets ---
     for ticket in db["tickets"].find():
         content = f"Ticket Name: {ticket.get('name', 'Unknown')}, Problem: {ticket.get('description', '')}, Priority: {ticket.get('priority', 'low')}, Status: {ticket.get('status', 'open')}"
-        documents.append(Document(page_content=content, metadata={"source_id": str(ticket["_id"]), "type": "ticket"}))
+        documents.append(Document(page_content=content, metadata={"source_id": str(ticket["_id"]), "type": "ticket", "company_id": str(ticket.get("company_id", ""))}))
 
     # --- 6. Stock Items ---
    

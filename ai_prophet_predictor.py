@@ -66,7 +66,7 @@ def train_and_forecast(daily_df):
 
 
 
-def create_alert_ticket(item_name, current_qty, days_left, empty_date):
+def create_alert_ticket(item_name, current_qty, days_left, empty_date, company_id=None):
     """
     Opens an emergency ticket if stock is about to run out.
     Checks first that no open ticket exists for the same item to prevent duplicates.
@@ -80,7 +80,10 @@ def create_alert_ticket(item_name, current_qty, days_left, empty_date):
         return
 
     # جلب الإدمن (عدلناها لـ role بدل type لو الداتا بيز عندك كده)
-    admin = db.users.find_one({"role": "admin"}) 
+    query_admin = {"role": "admin"}
+    if company_id:
+        query_admin["company_id"] = company_id
+    admin = db.users.find_one(query_admin)
     if not admin:
         admin = db.users.find_one({"type": "admin"}) # احتياطي
         
@@ -92,7 +95,7 @@ def create_alert_ticket(item_name, current_qty, days_left, empty_date):
     short_uuid = uuid.uuid4().hex[:6]
     custom_ticket_id = f"tkt_alert_{timestamp}_{short_uuid}"
 
-    db.tickets.insert_one({
+    ticket_doc = {
         "custom_id": custom_ticket_id,
         "name": ticket_title,
         "description": (
@@ -106,12 +109,17 @@ def create_alert_ticket(item_name, current_qty, days_left, empty_date):
         "created_by": admin_id,
         "createdAt": now_utc,
         "updatedAt": now_utc
-    })
+    }
+    # ✅ إضافة company_id لو موجود عشان التيكت يظهر للشركة الصح
+    if company_id:
+        ticket_doc["company_id"] = company_id
+
+    db.tickets.insert_one(ticket_doc)
     print(f"   🎟️ Emergency ticket created automatically.")
 
 
 
-def analyze_stock_item(stock):
+def analyze_stock_item(stock, company_id=None):
     """
     Analyzes a single stock item:
     1. Fetches consumption history from ai_stock_history
@@ -152,7 +160,6 @@ def analyze_stock_item(stock):
         return {"item_id": str(item_id), "item_name": item_name, "status": "insufficient_variation", "current_qty": current_qty}
 
     # حساب متوسط السحب اليومي المتوقع في الـ FORECAST_DAYS الجايين
-    # الـ yhat في Prophet = الرقم المتوقع
     predicted_daily_burn = forecast.tail(FORECAST_DAYS)["yhat"].mean()
 
     # لو التوقع طلع سالب أو صفر، نحط حد أدنى منطقي عشان نتجنب القسمة على صفر
@@ -168,7 +175,8 @@ def analyze_stock_item(stock):
     # نظام التحذير: لو المخزن هيخلص في الـ ALERT_THRESHOLD_DAYS الجايين
     if days_left <= ALERT_THRESHOLD_DAYS:
         print(f"   🚨 Critical warning: stock is about to run out!")
-        create_alert_ticket(item_name, current_qty, days_left, empty_date)
+        # ✅ بنمرر company_id عشان التيكت يتعمل للشركة الصح
+        create_alert_ticket(item_name, current_qty, days_left, empty_date, company_id=company_id)
     else:
         print(f"   ✅ Stock level is safe.")
         
@@ -216,7 +224,8 @@ def predict_stock_with_meta(company_id: str = None):
 
     results = []
     for stock in aggregated.values():
-        res = analyze_stock_item(stock)
+        # ✅ بنمرر company_id عشان الـ alert ticket يتعمل للشركة الصح
+        res = analyze_stock_item(stock, company_id=company_id)
         if res:
             results.append(res)
 
